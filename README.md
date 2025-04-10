@@ -24,7 +24,7 @@ Hub for my key tracking and management
 <h3 align="center">Bitcoin Private Key Detials App</h3>
     <p align="center">
     <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="./images/convertBTC.png">
+        <source media="(prefers-color-scheme: dark)" srcset="./images/view_privKey.png">
         <img src="./images/view_privkey_00.png">
     </picture>
     </p>
