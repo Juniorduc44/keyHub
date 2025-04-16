@@ -1,44 +1,12 @@
-
 import customtkinter as ctk
-import hashlib
-import base58
-from bitcoinlib.wallets import Wallet, WalletError
-import bitcoinlib.wallets
-from bitcoinlib.keys import Key
+from bitcoinlib.keys import Key, HDKey
+from bitcoinlib.wallets import Wallet, WalletError, wallet_delete_if_exists
 from bitcoinlib.services.services import Service
+import time
 
 # Customtkinter setup
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
-
-def hex_to_wif_uncompressed(private_key_hex):
-    """
-    Convert a hex private key to WIF format (uncompressed).
-    
-    Args:
-        private_key_hex (str): The private key in hex format (64 characters).
-    
-    Returns:
-        str: The uncompressed WIF private key.
-    """
-    # Validate the private key
-    if len(private_key_hex) != 64 or not all(c in "0123456789abcdefABCDEF" for c in private_key_hex):
-        raise ValueError("Private key must be a 64-character hexadecimal string.")
-
-    # Add the Bitcoin mainnet prefix (0x80)
-    extended_key = "80" + private_key_hex
-
-    # Compute the checksum (double SHA256, take first 4 bytes)
-    first_sha = hashlib.sha256(bytes.fromhex(extended_key)).digest()
-    second_sha = hashlib.sha256(first_sha).digest()
-    checksum = second_sha.hex()[:8]
-
-    # Combine extended key and checksum
-    key_with_checksum = extended_key + checksum
-
-    # Encode with Base58
-    wif_private_key = base58.b58encode(bytes.fromhex(key_with_checksum)).decode('utf-8')
-    return wif_private_key
 
 class BitcoinWalletApp(ctk.CTk):
     def __init__(self):
@@ -49,8 +17,8 @@ class BitcoinWalletApp(ctk.CTk):
         self.resizable(True, True)
         self.minsize(400, 300)
 
-        # Wallet name
-        self.wallet_name = "mywallet_00"
+        # Wallet name with timestamp to avoid conflicts
+        self.wallet_name = f"mywallet_{int(time.time())}"
 
         # Create GUI elements
         self.create_widgets()
@@ -61,7 +29,7 @@ class BitcoinWalletApp(ctk.CTk):
         key_frame.pack(pady=10, padx=10, fill="x")
 
         ctk.CTkLabel(key_frame, text="Enter Private Key (hex):").pack(side="left", padx=5)
-        self.key_entry = ctk.CTkEntry(key_frame, width=400, placeholder_text="e.g., e9873d79c6d87dc0fb6a5778633389f4453213303da61f20bd67fc233aa33262")
+        self.key_entry = ctk.CTkEntry(key_frame, width=400, placeholder_text="e.g., 0000000000000000000000000000000000000000000000000fc07a1825367bbe")
         self.key_entry.pack(side="left", padx=5)
 
         # Button to process the key
@@ -77,15 +45,19 @@ class BitcoinWalletApp(ctk.CTk):
         self.result_text.pack(pady=10, padx=10, fill="both", expand=True)
         self.result_text.insert("0.0", "Results will appear here...\n")
 
+        # Configure tags for colored text
+        self.result_text.tag_config("green", foreground="green")
+        self.result_text.tag_config("red", foreground="red")
+
     def copy_results(self):
         """Copy the contents of the result text area to the clipboard."""
         content = self.result_text.get("0.0", "end").strip()
         if content and content != "Results will appear here...":
             self.clipboard_clear()
             self.clipboard_append(content)
-            ctk.CTkMessageBox.show_info(self, "Success", "Results copied to clipboard!")
+            self.result_text.insert("end", "\nResults copied to clipboard!\n")
         else:
-            ctk.CTkMessageBox.show_warning(self, "Warning", "No results to copy.")
+            self.result_text.insert("end", "\nNo results to copy.\n")
 
     def process_key(self):
         """Process the private key and display wallet information."""
@@ -104,78 +76,98 @@ class BitcoinWalletApp(ctk.CTk):
             self.result_text.insert("end", "Error: Private key must be a 64-character hexadecimal string.\n")
             return
 
-        # Step 1: Create key objects for both compressed and uncompressed keys
+        # Step 1: Create key objects for compressed and uncompressed keys
         try:
-            # Compressed key (default in bitcoinlib)
             key_compressed = Key(private_key_hex, compressed=True)
-            # Uncompressed key
             key_uncompressed = Key(private_key_hex, compressed=False)
-            # Generate the uncompressed WIF using the manual method
-            wif_uncompressed = hex_to_wif_uncompressed(private_key_hex)
+            wif_compressed = key_compressed.wif()
+            wif_uncompressed = key_uncompressed.wif()
 
-            self.result_text.insert("end", "Complete Key and Address Details:\n")
-            self.result_text.insert("end", "-" * 50 + "\n")
-            self.result_text.insert("end", f"Private Key (hex):\n{private_key_hex}\n")
-            self.result_text.insert("end", f"Private Key WIF (Compressed):\n{key_compressed.wif()}\n")
-            self.result_text.insert("end", f"Private Key WIF (Uncompressed):\n{wif_uncompressed}\n\n")
-            self.result_text.insert("end", f"Public Key (Compressed):\n{key_compressed.public_hex}\n")
-            self.result_text.insert("end", f"Public Key (Uncompressed):\n{key_uncompressed.public_hex}\n\n")
-            self.result_text.insert("end", f"Legacy Address (Compressed):\n{key_compressed.address()}\n")
-            self.result_text.insert("end", f"Legacy Address (Uncompressed):\n{key_uncompressed.address()}\n\n")
+            self.result_text.insert("end", "Private Key Details:\n")
+            self.result_text.insert("end", f"  Hex: {private_key_hex}\n")
+            self.result_text.insert("end", f"  WIF Compressed: {wif_compressed}\n")
+            self.result_text.insert("end", f"  WIF Uncompressed: {wif_uncompressed}\n")
+            self.result_text.insert("end", f"  Public Key (Compressed): {key_compressed.public_hex}\n")
+            self.result_text.insert("end", f"  Public Key (Uncompressed): {key_uncompressed.public_hex}\n")
+            self.result_text.insert("end", f"  Legacy Address (Compressed): {key_compressed.address()}\n")
+            self.result_text.insert("end", f"  Legacy Address (Uncompressed): {key_uncompressed.address()}\n\n")
         except Exception as e:
             self.result_text.insert("end", f"Error creating key: {e}\n")
             return
 
         # Step 2: Delete the wallet if it exists
         try:
-            bitcoinlib.wallets.wallet_delete_if_exists(self.wallet_name)
+            wallet_delete_if_exists(self.wallet_name)
             self.result_text.insert("end", f"Deleted existing wallet '{self.wallet_name}' (if it existed).\n")
-        except WalletError as e:
-            if "does not exist" in str(e).lower():
-                pass  # Wallet didn't exist, no issue
-            else:
-                self.result_text.insert("end", f"Error deleting wallet: {e}\n")
         except Exception as e:
-            self.result_text.insert("end", f"Unexpected error during wallet deletion: {e}\n")
+            self.result_text.insert("end", f"Error deleting wallet: {e}\n")
 
-        # Step 3: Create a new wallet with the compressed private key
+        # Step 3: Create a new wallet with the compressed private key and get xpriv
+        wallet = None
+        xpriv = None
         try:
-            wallet = Wallet.create(self.wallet_name, keys=key_compressed.wif(), network='bitcoin')
-            self.result_text.insert("end", f"\nCreated new wallet '{self.wallet_name}' (compressed key).\n")
+            wallet = Wallet.create(self.wallet_name, keys=wif_compressed, network='bitcoin', witness_type='legacy')
+            self.result_text.insert("end", f"Created new wallet '{self.wallet_name}' (compressed key).\n")
+            # Try to get xpriv from wallet's main key
+            xpriv = wallet.main_key.wif
+            if not xpriv.startswith('xprv'):
+                # Fallback: Generate xpriv using HDKey
+                hd_key = HDKey(private_key_hex, network='bitcoin')
+                xpriv = hd_key.extended_key()
+            self.result_text.insert("end", f"BIP32 Extended Private Key (xpriv):\n  {xpriv}\n\n")
         except Exception as e:
-            self.result_text.insert("end", f"Error creating wallet: {e}\n")
-            return
+            self.result_text.insert("end", f"Error creating wallet or generating xpriv: {str(e)}\n")
+            # Fallback: Try generating xpriv without wallet
+            try:
+                hd_key = HDKey(private_key_hex, network='bitcoin')
+                xpriv = hd_key.extended_key()
+                self.result_text.insert("end", f"BIP32 Extended Private Key (xpriv, fallback):\n  {xpriv}\n\n")
+            except Exception as fallback_e:
+                self.result_text.insert("end", f"Error generating xpriv (fallback): {fallback_e}\n")
 
         # Step 4: Update the wallet's transaction history and balance (compressed key)
-        try:
-            wallet.scan()  # Scan the blockchain for transactions
-            self.result_text.insert("end", f"Scanned wallet for transactions (compressed key).\n")
-        except Exception as e:
-            self.result_text.insert("end", f"Error scanning wallet: {e}\n")
+        if wallet:
+            try:
+                wallet.scan()
+                self.result_text.insert("end", f"Scanned wallet for transactions (compressed key).\n")
+            except Exception as e:
+                self.result_text.insert("end", f"Error scanning wallet: {e}\n")
 
-        # Step 5: Fetch and display the balance (compressed key)
-        try:
-            balance = wallet.balance()
-            self.result_text.insert("end", f"\nWallet Info (Compressed Key):\n")
-            self.result_text.insert("end", f"Wallet Name: {self.wallet_name}\n")
-            self.result_text.insert("end", f"Balance: {balance} BTC\n")
-        except Exception as e:
-            self.result_text.insert("end", f"Error fetching balance: {e}\n")
+            # Step 5: Fetch and display the wallet balance with color
+            try:
+                balance = wallet.balance()
+                balance_btc = balance / 100000000
+                self.result_text.insert("end", "Wallet Info (Compressed Key):\n")
+                self.result_text.insert("end", f"  Wallet Name: {self.wallet_name}\n")
+                if balance > 0:
+                    self.result_text.insert("end", f"  Balance: {balance_btc} BTC\n", "green")
+                else:
+                    self.result_text.insert("end", f"  Balance: {balance_btc} BTC\n", "red")
+            except Exception as e:
+                self.result_text.insert("end", f"Error fetching wallet balance: {e}\n")
 
-        # Step 6: Use a service provider to verify the balance for both addresses
+        # Step 6: Use a service provider to verify balances for both addresses with color
         try:
             service = Service(network='bitcoin')
             # Compressed address balance
             address_compressed = key_compressed.address()
             balance_compressed = service.getbalance(address_compressed)
-            self.result_text.insert("end", f"\nDirect Balance Check (via service provider):\n")
-            self.result_text.insert("end", f"\nCompressed Address: {address_compressed}\n")
-            self.result_text.insert("end", f"Balance (Compressed): {balance_compressed / 100000000} BTC\n")
+            balance_compressed_btc = balance_compressed / 100000000
+            self.result_text.insert("end", "\nDirect Balance Check:\n")
+            self.result_text.insert("end", f"  Compressed Address: {address_compressed}\n")
+            if balance_compressed > 0:
+                self.result_text.insert("end", f"  Balance: {balance_compressed_btc} BTC\n", "green")
+            else:
+                self.result_text.insert("end", f"  Balance: {balance_compressed_btc} BTC\n", "red")
             # Uncompressed address balance
             address_uncompressed = key_uncompressed.address()
             balance_uncompressed = service.getbalance(address_uncompressed)
-            self.result_text.insert("end", f"Uncompressed Address: {address_uncompressed}\n")
-            self.result_text.insert("end", f"Balance (Uncompressed): {balance_uncompressed / 100000000} BTC\n")
+            balance_uncompressed_btc = balance_uncompressed / 100000000
+            self.result_text.insert("end", f"  Uncompressed Address: {address_uncompressed}\n")
+            if balance_uncompressed > 0:
+                self.result_text.insert("end", f"  Balance: {balance_uncompressed_btc} BTC\n", "green")
+            else:
+                self.result_text.insert("end", f"  Balance: {balance_uncompressed_btc} BTC\n", "red")
         except Exception as e:
             self.result_text.insert("end", f"Error fetching balance directly: {e}\n")
 
